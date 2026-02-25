@@ -89,3 +89,4 @@ The AI has a **local regex fallback** — if no API key is set, common commands 
 - **API Key Security**: Anthropic key lives server-side only in `/api/interpret.js`
 - **CPM Engine**: Pure JS, zero deps, handles FS/SS/FF/SF with lag/lead
 - **Web Speech API**: Built into Chrome/Edge. No third-party STT needed.
+# constructiq
