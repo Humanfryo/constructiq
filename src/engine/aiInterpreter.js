@@ -126,5 +126,11 @@ export function parseCommandLocally(input, activityList) {
   if (cmd.match(/\b(duration|extend|shorten)\b/)) { const a = findAct(cmd), d = extractDays(cmd); if (a && d) return { action: 'duration', activityId: a.id, newDuration: d }; return { action: 'clarify', message: 'I need an activity and duration.' }; }
   if (cmd.match(/\b(mark|complete|status)\b/)) { const a = findAct(cmd), s = cmd.includes('complete') ? 'Completed' : cmd.includes('progress') ? 'In Progress' : null; if (a && s) return { action: 'status', activityId: a.id, status: s }; return { action: 'clarify', message: 'Example: "mark SS1210 as completed"' }; }
   if (cmd.match(/\b(show|filter|view)\b/)) { if (cmd.includes('all')) return { action: 'show_all' }; const b = extractBuilding(cmd); if (b) return { action: 'filter', filter: 'building', building: b }; const a = findAct(cmd); if (a) return { action: 'highlight', activityId: a.id }; return { action: 'clarify', message: 'Try: "show building 1" or "show all"' }; }
+
+  // Critical path
+  if (/critical\s*path|zero\s*float|critical\s*activit/i.test(input)) {
+    return { action: 'critical_path' };
+  }
+
   return { action: 'clarify', message: 'Try: "push SS1210 by 5 days", "link FD1140 to SS1200", "show building 1", "create a new activity called Site Inspection in Building 1 MEP"' };
 }
