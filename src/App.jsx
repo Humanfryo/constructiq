@@ -603,6 +603,10 @@ export default function App() {
   // Process command — either via typing or voice
   const processCommand = useCallback(async (input) => {
     if (!input.trim()) return;
+    // Auto-stop mic when sending a command
+    if (voice.isListening) {
+      voice.stopListening();
+    }
     addLog(`▸ ${input}`, 'command');
     setIsProcessing(true);
     try {
@@ -612,7 +616,7 @@ export default function App() {
       addLog(`✗ Error processing command: ${err.message}`, 'error');
     }
     setIsProcessing(false);
-  }, [engine, executeAction, addLog]);
+  }, [engine, executeAction, addLog, voice]);
 
   // Sync live voice transcription into the command input field (no auto-submit)
   useEffect(() => {
