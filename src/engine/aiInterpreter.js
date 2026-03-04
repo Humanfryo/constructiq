@@ -132,5 +132,21 @@ export function parseCommandLocally(input, activityList) {
     return { action: 'critical_path' };
   }
 
+  // Trade filter
+  const tradeMatch = input.match(/(?:show|filter|display)\s+(?:me\s+)?(?:all\s+)?(\w[\w\s\/]*?)(?:\s+(?:across|in|for)\s+all|\s*$)/i);
+  if (tradeMatch) {
+    const tradeMap = {
+      'electrical': 'Electrical', 'plumbing': 'Plumbing', 'steel': 'Structural Steel',
+      'structural steel': 'Structural Steel', 'concrete': 'Concrete', 'mechanical': 'Mechanical/HVAC',
+      'hvac': 'Mechanical/HVAC', 'fire protection': 'Fire Protection', 'fire': 'Fire Protection',
+      'power': 'Power Systems', 'generator': 'Power Systems', 'ups': 'Power Systems',
+      'finishes': 'Finishes', 'commissioning': 'Commissioning',
+    };
+    const key = tradeMatch[1].trim().toLowerCase();
+    if (tradeMap[key]) {
+      return { action: 'filter_trade', trade: tradeMap[key] };
+    }
+  }
+
   return { action: 'clarify', message: 'Try: "push SS1210 by 5 days", "link FD1140 to SS1200", "show building 1", "create a new activity called Site Inspection in Building 1 MEP"' };
 }
