@@ -25,10 +25,15 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
   const sorted = useMemo(() => {
     return [...activities].sort((a, b) => {
       if (a.building !== b.building) return a.building - b.building;
-      const wo = ['PRECON','Foundation','Steel','Concrete','MEP','Finishes','Commissioning'];
+      const wo = ['PRECON', 'Foundation', 'Steel', 'Concrete', 'MEP', 'Finishes', 'Commissioning'];
       const ai = wo.findIndex(w => a.wbs.includes(w));
       const bi = wo.findIndex(w => b.wbs.includes(w));
-      if (ai !== bi) return ai - bi;
+      // Custom WBS categories (not in the standard list) sort to the end
+      const aIdx = ai >= 0 ? ai : 999;
+      const bIdx = bi >= 0 ? bi : 999;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      // Within same WBS, sort by custom WBS name alphabetically, then by start day
+      if (ai < 0 && bi < 0 && a.wbs !== b.wbs) return a.wbs.localeCompare(b.wbs);
       return (a.calculatedStart || a.startDay) - (b.calculatedStart || b.startDay);
     });
   }, [activities]);
@@ -47,7 +52,7 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
   const chartHeight = useMemo(() => {
     let rows = 0;
     filtered.forEach((a, i) => {
-      const showH = i === 0 || filtered[i-1].building !== a.building || filtered[i-1].wbsName !== a.wbsName;
+      const showH = i === 0 || filtered[i - 1].building !== a.building || filtered[i - 1].wbsName !== a.wbsName;
       rows += showH ? 2 : 1;
     });
     return rows * ROW_HEIGHT;
@@ -77,7 +82,7 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
     const pos = new Map();
     let row = 0;
     filtered.forEach((a, i) => {
-      const showH = i === 0 || filtered[i-1].building !== a.building || filtered[i-1].wbsName !== a.wbsName;
+      const showH = i === 0 || filtered[i - 1].building !== a.building || filtered[i - 1].wbsName !== a.wbsName;
       row += showH ? 2 : 1;
       pos.set(a.id, row);
     });
@@ -97,7 +102,7 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
           {filtered.map((act, idx) => {
             const isHL = highlighted.has(act.id);
             const isAnim = animating.has(act.id);
-            const showH = idx === 0 || filtered[idx-1].building !== act.building || filtered[idx-1].wbsName !== act.wbsName;
+            const showH = idx === 0 || filtered[idx - 1].building !== act.building || filtered[idx - 1].wbsName !== act.wbsName;
             return (
               <div key={act.id}>
                 {showH && (
@@ -167,8 +172,8 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
                 const isHL = highlighted.has(pred.id) || highlighted.has(succ.id);
                 return (
                   <g key={i} opacity={isHL ? 0.7 : 0.15}>
-                    <path d={`M ${x1} ${pY} L ${x1+8} ${pY} L ${x1+8} ${sY} L ${x2} ${sY}`} fill="none" stroke={isHL ? '#60a5fa' : '#475569'} strokeWidth={isHL ? 1.5 : 0.7} />
-                    <polygon points={`${x2},${sY} ${x2-4},${sY-3} ${x2-4},${sY+3}`} fill={isHL ? '#60a5fa' : '#475569'} />
+                    <path d={`M ${x1} ${pY} L ${x1 + 8} ${pY} L ${x1 + 8} ${sY} L ${x2} ${sY}`} fill="none" stroke={isHL ? '#60a5fa' : '#475569'} strokeWidth={isHL ? 1.5 : 0.7} />
+                    <polygon points={`${x2},${sY} ${x2 - 4},${sY - 3} ${x2 - 4},${sY + 3}`} fill={isHL ? '#60a5fa' : '#475569'} />
                   </g>
                 );
               })}
@@ -435,6 +440,156 @@ export default function App() {
         }
         break;
       }
+
+      // ============================================================
+      // NEW: Create a single activity
+      // ============================================================
+      case 'create_activity': {
+        const building = parsed.building;
+        const wbs = parsed.wbs || `BLDG${building}.General`;
+        const duration = parsed.duration || 5;
+        const name = parsed.name;
+
+        if (!building || !name) {
+          addLog(`✗ Need a building number and activity name to create an activity`, 'error');
+          break;
+        }
+
+        // Resolve predecessor: explicit code, or afterLast (append to end of WBS)
+        let predecessorId = null;
+        if (parsed.predecessorCode) {
+          const predAct = engine.getActivity(parsed.predecessorCode);
+          if (predAct) {
+            predecessorId = predAct.id;
+          } else {
+            addLog(`⚠ Predecessor ${parsed.predecessorCode} not found — creating without link`, 'warning');
+          }
+        } else if (parsed.afterLast) {
+          const lastAct = engine.getLastActivityInWBS(wbs);
+          if (lastAct) {
+            predecessorId = lastAct.id;
+          }
+        }
+
+        const newAct = engine.createActivity({
+          wbs,
+          name,
+          duration,
+          building,
+          predecessorId,
+        });
+
+        if (newAct) {
+          refresh();
+          const hl = new Set([newAct.id]);
+          setHighlighted(hl);
+          setAnimating(hl);
+          setTimeout(() => setAnimating(new Set()), 3000);
+
+          const startDate = formatDate(newAct.calculatedStart || newAct.startDay);
+          const predInfo = predecessorId ? ` (linked after ${predecessorId})` : '';
+          addLog(`✓ Created ${newAct.code}: "${newAct.name}" — ${duration}d, ${newAct.wbsName}, Bldg ${building}, starts ${startDate}${predInfo}`, 'success');
+        } else {
+          addLog(`✗ Failed to create activity`, 'error');
+        }
+        break;
+      }
+
+      // ============================================================
+      // NEW: Create a new WBS with activities
+      // ============================================================
+      case 'create_wbs': {
+        const building = parsed.building;
+        const wbsCode = parsed.wbsCode;
+        const wbsName = parsed.wbsName;
+
+        if (!building || !wbsCode || !wbsName) {
+          addLog(`✗ Need building, WBS code, and WBS name. Example: "Create a new WBS called Site Utilities in Building 1"`, 'error');
+          break;
+        }
+
+        const activityDefs = parsed.activities || [];
+        const result = engine.createWBS({
+          building,
+          wbsCode,
+          wbsName,
+          activities: activityDefs,
+        });
+
+        refresh();
+
+        const hl = new Set(result.activities.map(a => a.id));
+        setHighlighted(hl);
+        setAnimating(hl);
+        setTimeout(() => setAnimating(new Set()), 3000);
+
+        if (result.activities.length > 0) {
+          const actNames = result.activities.map(a => `${a.code} (${a.name}, ${a.duration}d)`).join(', ');
+          addLog(`✓ Created WBS "${wbsName}" in Bldg ${building} with ${result.activities.length} activities: ${actNames}`, 'success');
+        } else {
+          addLog(`✓ Created WBS "${wbsName}" (${result.wbs}) in Bldg ${building} — empty, ready for activities`, 'success');
+        }
+
+        // Filter to that building so user can see the new WBS
+        setFilterBuilding(building);
+        break;
+      }
+
+      // ============================================================
+      // NEW: Create multiple activities in an existing WBS
+      // ============================================================
+      case 'create_activities': {
+        const building = parsed.building;
+        const wbs = parsed.wbs || `BLDG${building}.General`;
+        const activityDefs = parsed.activities || [];
+
+        if (!building || activityDefs.length === 0) {
+          addLog(`✗ Need a building and at least one activity definition`, 'error');
+          break;
+        }
+
+        // Find the last activity in the target WBS to chain after
+        let prevId = null;
+        const lastExisting = engine.getLastActivityInWBS(wbs);
+        if (lastExisting) prevId = lastExisting.id;
+
+        const created = [];
+        activityDefs.forEach((def) => {
+          // If this def has a specific predecessor, use it; otherwise chain sequentially
+          let predId = prevId;
+          if (def.predecessorCode) {
+            const predAct = engine.getActivity(def.predecessorCode);
+            if (predAct) predId = predAct.id;
+          }
+
+          const act = engine.createActivity({
+            wbs,
+            name: def.name,
+            duration: def.duration || 5,
+            building,
+            predecessorId: predId,
+          });
+
+          if (act) {
+            created.push(act);
+            prevId = act.id;
+          }
+        });
+
+        refresh();
+
+        const hl = new Set(created.map(a => a.id));
+        setHighlighted(hl);
+        setAnimating(hl);
+        setTimeout(() => setAnimating(new Set()), 3000);
+
+        const actNames = created.map(a => `${a.code} (${a.name}, ${a.duration}d)`).join(', ');
+        addLog(`✓ Created ${created.length} activities in Bldg ${building}: ${actNames}`, 'success');
+
+        setFilterBuilding(building);
+        break;
+      }
+
       case 'clarify': {
         addLog(`⚠ ${parsed.message}`, 'warning');
         break;
@@ -656,8 +811,8 @@ export default function App() {
               placeholder={voice.micBlocked
                 ? 'Type or use keyboard dictation (Mac: Fn Fn, Win: Win+H, Mobile: 🎤) — AI understands natural language!'
                 : voice.isSupported
-                ? 'Type a command or click the mic to speak... (e.g., "Push steel erection back by 2 weeks")'
-                : 'Type a command... (e.g., "Push SS1210 by 5 days")'}
+                  ? 'Type a command or click the mic to speak... (e.g., "Create a 10-day Cable Tray Installation in Building 1 MEP")'
+                  : 'Type a command... (e.g., "Push SS1210 by 5 days")'}
               style={{
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
                 color: '#e2e8f0', fontSize: 13, fontFamily: "'JetBrains Mono', monospace",
@@ -681,11 +836,11 @@ export default function App() {
         {/* Quick actions */}
         <div style={{ display: 'flex', gap: 4, padding: '0 16px 8px', flexWrap: 'wrap' }}>
           {[
+            'Add a 10-day Cable Tray Installation to Building 1 MEP',
+            'Create a new WBS called Site Utilities in Building 2 with Storm Drain Layout 5 days, Storm Drain Installation 12 days, Utility Connections 8 days',
             'Push the steel erection back by 2 weeks',
-            'Change duration of excavation building 1 to 12 days',
             'Link foundation to steel for building 2',
             'Show me building 3',
-            'Mark pile driving building 1 as completed',
             'Show all buildings',
           ].map(ex => (
             <button key={ex} onClick={() => { setCommand(ex); inputRef.current?.focus(); }}

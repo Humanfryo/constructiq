@@ -67,7 +67,26 @@ Given a natural language command, output ONLY a JSON object (no markdown, no exp
 
 10. Bulk link phases: {"action":"link_phases","building":1,"fromPhase":"Foundation","toPhase":"Steel"}
 
-11. If unclear: {"action":"clarify","message":"your clarification question"}
+11. Create a new activity: {"action":"create_activity","name":"Cable Tray Installation","duration":10,"building":1,"wbs":"BLDG1.MEP","predecessorCode":"ME1420"}
+    - wbs must follow the pattern BLDG{n}.{Phase} where Phase is one of: PRECON, Foundation, Steel, Concrete, MEP, Finishes, Commissioning, or a new custom name
+    - building: integer 1-4
+    - duration: integer days (default 5 if not specified)
+    - predecessorCode: (optional) activity code to link after. If user says "after ME1420" or "following the electrical rough-in", resolve to the activity code
+    - If user says "add it to the end of MEP" or "append to steel phase", set afterLast: true and the system will auto-find the last activity in that WBS
+    - IMPORTANT: Always infer building from context. If user says "add an activity in building 2 MEP", building=2, wbs="BLDG2.MEP"
+
+12. Create a new WBS with activities: {"action":"create_wbs","building":1,"wbsCode":"SiteUtil","wbsName":"Site Utilities","activities":[{"name":"Storm Drain Layout","duration":5},{"name":"Storm Drain Installation","duration":12},{"name":"Utility Connections","duration":8}]}
+    - wbsCode: short code for the WBS (no spaces, PascalCase or camelCase)
+    - wbsName: human-readable name
+    - activities: array of {name, duration} — they will be auto-chained sequentially (each starts after the previous finishes)
+    - building: integer 1-4
+    - If the user narrates multiple activities in one breath, capture them ALL in the activities array
+
+13. Create multiple activities at once: {"action":"create_activities","building":1,"wbs":"BLDG1.Foundation","activities":[{"name":"Micropile Installation","duration":15},{"name":"Pile Cap Formwork","duration":8,"predecessorCode":"FD1150"}]}
+    - Same as create_wbs but adds to an EXISTING WBS
+    - activities are auto-chained unless a specific predecessorCode is given
+
+14. If unclear: {"action":"clarify","message":"your clarification question"}
 
 IMPORTANT RULES:
 - "push back" or "delay" = POSITIVE days (later)
@@ -75,6 +94,11 @@ IMPORTANT RULES:
 - "2 weeks" = 14 days, "1 week" = 7 days, "a month" = 30 days
 - Match activity names fuzzily — "steel erection" matches "Erect Columns Zone 1"
 - If user says a phase name without specifying building, ask for clarification
+- When user narrates new activities, ALWAYS capture every activity they mention — do not drop any
+- For create commands, if the user says "add", "create", "new activity", "insert", "I need a", "put in a" — these are create intents
+- If user describes work to be done without specifying duration, default to 5 days
+- If user says "under steel" or "in the steel phase", resolve wbs to BLDG{n}.Steel
+- Common WBS mappings: "electrical"/"elec" → MEP, "plumbing"/"piping" → MEP, "HVAC"/"mechanical" → MEP, "drywall"/"paint"/"flooring"/"doors" → Finishes, "testing"/"energization"/"balancing" → Commissioning
 
 Here are all activities:
 ${actSummary}`;
@@ -89,7 +113,7 @@ ${actSummary}`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 500,
+        max_tokens: 1000,
         messages: [{ role: 'user', content: userInput }],
         system: systemPrompt,
       }),
