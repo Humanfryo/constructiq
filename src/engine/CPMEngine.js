@@ -4,6 +4,10 @@ export class CPMEngine {
     this.relationships = relationships || [];
     activities.forEach(a => this.activities.set(a.id, { ...a }));
   }
+
+  // ============================================================
+  // FORWARD PASS — Early Start / Early Finish
+  // ============================================================
   forwardPass() {
     const order = this.topologicalSort();
     order.forEach(id => {
@@ -33,6 +37,102 @@ export class CPMEngine {
       act.calculatedStart = act.earlyStart;
     });
   }
+
+  // ============================================================
+  // BACKWARD PASS — Late Start / Late Finish / Total Float
+  // ============================================================
+  // Processes activities in reverse topological order.
+  // Activities with no successors get lateFinish = project end date.
+  // Float = lateStart - earlyStart (zero float = critical).
+  // ============================================================
+  backwardPass() {
+    // 1. Find the project end date (max earlyFinish across all activities)
+    let projectEnd = 0;
+    this.activities.forEach(act => {
+      const ef = act.earlyFinish != null ? act.earlyFinish : (act.startDay + act.duration - 1);
+      if (ef > projectEnd) projectEnd = ef;
+    });
+
+    // 2. Initialize all activities with lateFinish = projectEnd
+    this.activities.forEach(act => {
+      act.lateFinish = projectEnd;
+      act.lateStart = projectEnd - act.duration + 1;
+      act.totalFloat = 0;
+      act.isCritical = false;
+    });
+
+    // 3. Build a set of activities that have successors
+    const hasSuccessor = new Set();
+    this.relationships.forEach(r => {
+      if (this.activities.has(r.predecessor)) {
+        hasSuccessor.add(r.predecessor);
+      }
+    });
+
+    // 4. Process in reverse topological order
+    const order = this.topologicalSort();
+    const reverseOrder = [...order].reverse();
+
+    reverseOrder.forEach(id => {
+      const act = this.activities.get(id);
+      if (!act) return;
+
+      // Find all relationships where this activity is the PREDECESSOR
+      const succs = this.relationships.filter(r => r.predecessor === id);
+
+      if (succs.length === 0) {
+        // No successors — lateFinish stays at projectEnd
+        act.lateFinish = projectEnd;
+      } else {
+        // Constrain lateFinish based on each successor
+        let minLF = projectEnd;
+
+        succs.forEach(r => {
+          const succ = this.activities.get(r.successor);
+          if (!succ) return;
+          const lag = r.lag || 0;
+
+          let constraint;
+          switch (r.type) {
+            case 'FS':
+              // pred must finish before succ starts: LF ≤ succ.LS - 1 - lag
+              constraint = succ.lateStart - 1 - lag;
+              break;
+            case 'SS':
+              // pred must start before succ starts: LS ≤ succ.LS - lag
+              // → LF ≤ succ.LS - lag + duration - 1
+              constraint = succ.lateStart - lag + act.duration - 1;
+              break;
+            case 'FF':
+              // pred must finish before succ finishes: LF ≤ succ.LF - lag
+              constraint = succ.lateFinish - lag;
+              break;
+            case 'SF':
+              // pred must start before succ finishes: LS ≤ succ.LF - lag
+              // → LF ≤ succ.LF - lag + duration - 1
+              constraint = succ.lateFinish - lag + act.duration - 1;
+              break;
+            default:
+              constraint = succ.lateStart - 1 - lag;
+          }
+
+          if (constraint < minLF) minLF = constraint;
+        });
+
+        act.lateFinish = minLF;
+      }
+
+      act.lateStart = act.lateFinish - act.duration + 1;
+      act.totalFloat = act.lateStart - act.earlyStart;
+
+      // Critical = zero float (with small epsilon for floating-point safety)
+      act.isCritical = Math.abs(act.totalFloat) < 0.001;
+    });
+  }
+
+  // ============================================================
+  // TOPOLOGICAL SORT
+  // ============================================================
   topologicalSort() {
     const inDeg = new Map(); const adj = new Map();
     this.activities.forEach((_, id) => { inDeg.set(id, 0); adj.set(id, []); });
@@ -51,43 +151,103 @@ export class CPMEngine {
     this.activities.forEach((_, id) => { if (!order.includes(id)) order.push(id); });
     return order;
   }
-  recalculate() { this.forwardPass(); return Array.from(this.activities.values()); }
+
+  // ============================================================
+  // RECALCULATE — Forward + Backward pass
+  // ============================================================
+  recalculate() {
+    this.forwardPass();
+    this.backwardPass();
+    return Array.from(this.activities.values());
+  }
+
+  // ============================================================
+  // CRITICAL PATH QUERIES
+  // ============================================================
+  getCriticalPath() {
+    return Array.from(this.activities.values()).filter(a => a.isCritical);
+  }
+
+  isCritical(id) {
+    const act = this.activities.get(id);
+    return act ? act.isCritical : false;
+  }
+
+  getFloat(id) {
+    const act = this.activities.get(id);
+    return act ? (act.totalFloat || 0) : 0;
+  }
+
+  getCriticalPathStats() {
+    const all = Array.from(this.activities.values());
+    const critical = all.filter(a => a.isCritical);
+    const nearCritical = all.filter(a => !a.isCritical && a.totalFloat <= 5);
+
+    // Find project end
+    let projectEnd = 0;
+    all.forEach(a => {
+      const ef = a.earlyFinish || (a.startDay + a.duration - 1);
+      if (ef > projectEnd) projectEnd = ef;
+    });
+
+    return {
+      totalActivities: all.length,
+      criticalCount: critical.length,
+      nearCriticalCount: nearCritical.length,
+      projectDuration: projectEnd,
+      criticalActivities: critical,
+      nearCriticalActivities: nearCritical,
+    };
+  }
+
+  // ============================================================
+  // EXISTING METHODS (unchanged)
+  // ============================================================
   getActivity(id) { return this.activities.get(id); }
-  updateActivity(id, changes) { const a = this.activities.get(id); if (!a) return null; Object.assign(a, changes); this.recalculate(); return a; }
+
+  updateActivity(id, changes) {
+    const a = this.activities.get(id);
+    if (!a) return null;
+    Object.assign(a, changes);
+    this.recalculate();
+    return a;
+  }
+
   addRelationship(pred, succ, type = 'FS', lag = 0) {
     if (!this.activities.has(pred) || !this.activities.has(succ)) return false;
     if (this.relationships.find(r => r.predecessor === pred && r.successor === succ)) return false;
-    this.relationships.push({ predecessor: pred, successor: succ, type, lag }); this.recalculate(); return true;
+    this.relationships.push({ predecessor: pred, successor: succ, type, lag });
+    this.recalculate();
+    return true;
   }
+
   removeRelationship(pred, succ) {
     const i = this.relationships.findIndex(r => r.predecessor === pred && r.successor === succ);
-    if (i === -1) return false; this.relationships.splice(i, 1); this.recalculate(); return true;
+    if (i === -1) return false;
+    this.relationships.splice(i, 1);
+    this.recalculate();
+    return true;
   }
+
   getDownstream(id) {
     const ds = new Set(); const q = [id];
-    while (q.length > 0) { const c = q.shift(); this.relationships.filter(r => r.predecessor === c).forEach(r => { if (!ds.has(r.successor)) { ds.add(r.successor); q.push(r.successor); } }); }
+    while (q.length > 0) {
+      const c = q.shift();
+      this.relationships.filter(r => r.predecessor === c).forEach(r => {
+        if (!ds.has(r.successor)) { ds.add(r.successor); q.push(r.successor); }
+      });
+    }
     return ds;
   }
+
   getAllActivitiesList() { return Array.from(this.activities.values()); }
 
   // ============================================================
-  // NEW: Create Activity
-  // ============================================================
-  // Generates a unique activity code and adds the activity to the engine.
-  // Returns the new activity object, or null if the WBS is invalid.
-  //
-  // wbs: full WBS path like "BLDG1.MEP" or "BLDG2.Foundation"
-  // name: activity name like "Cable Tray Installation"
-  // duration: integer days
-  // building: integer 1-4
-  // predecessorId: optional — auto-links FS if provided
-  // startDay: optional — defaults to project day 0 (will be pushed by CPM if linked)
+  // CREATE ACTIVITY
   // ============================================================
   createActivity({ wbs, wbsName, name, duration, building, predecessorId, startDay }) {
-    // Generate a unique code
     const code = this._generateCode(wbs, building);
 
-    // Determine start day: if predecessor given, place after it; otherwise use explicit or 0
     let effectiveStart = startDay || 0;
     if (predecessorId) {
       const pred = this.activities.get(predecessorId);
@@ -96,7 +256,6 @@ export class CPMEngine {
       }
     }
 
-    // Resolve wbsName from wbs path if not provided
     const resolvedWbsName = wbsName || this._wbsNameFromPath(wbs);
 
     const activity = {
@@ -114,7 +273,6 @@ export class CPMEngine {
 
     this.activities.set(code, activity);
 
-    // Auto-link to predecessor if provided
     if (predecessorId && this.activities.has(predecessorId)) {
       this.relationships.push({
         predecessor: predecessorId,
@@ -129,12 +287,7 @@ export class CPMEngine {
   }
 
   // ============================================================
-  // NEW: Create WBS (adds a group of placeholder activities)
-  // ============================================================
-  // Creates a new WBS category under a building and optionally seeds it
-  // with initial activities.
-  //
-  // Returns { wbs, wbsName, activities[] }
+  // CREATE WBS
   // ============================================================
   createWBS({ building, wbsCode, wbsName, activities: activityDefs }) {
     const wbs = `BLDG${building}.${wbsCode}`;
@@ -149,7 +302,7 @@ export class CPMEngine {
           name: def.name,
           duration: def.duration || 5,
           building,
-          predecessorId: def.predecessorId || prevId, // auto-chain sequentially
+          predecessorId: def.predecessorId || prevId,
           startDay: def.startDay,
         });
         if (act) {
@@ -162,9 +315,6 @@ export class CPMEngine {
     return { wbs, wbsName, activities: created };
   }
 
-  // ============================================================
-  // NEW: Get all unique WBS paths in the project
-  // ============================================================
   getWBSList() {
     const wbsSet = new Map();
     this.activities.forEach(a => {
@@ -175,9 +325,6 @@ export class CPMEngine {
     return Array.from(wbsSet.values());
   }
 
-  // ============================================================
-  // NEW: Find the last activity in a WBS (for appending after it)
-  // ============================================================
   getLastActivityInWBS(wbs) {
     let last = null;
     let maxEnd = -1;
@@ -195,21 +342,18 @@ export class CPMEngine {
 
   // ── Internal helpers ─────────────────────────────────────────
 
-  // Generate a unique activity code based on WBS phase prefix + building + sequence number
   _generateCode(wbs, building) {
-    // Map WBS category to 2-letter prefix
     const prefixMap = {
       'precon': 'PC', 'foundation': 'FD', 'steel': 'SS', 'concrete': 'CO',
       'mep': 'ME', 'finishes': 'FN', 'commissioning': 'CX', 'sitework': 'SW',
     };
 
     const wbsLower = (wbs || '').toLowerCase();
-    let prefix = 'GN'; // Generic fallback
+    let prefix = 'GN';
     for (const [key, val] of Object.entries(prefixMap)) {
       if (wbsLower.includes(key)) { prefix = val; break; }
     }
 
-    // Find the highest existing sequence number for this prefix + building
     const pattern = new RegExp(`^${prefix}${building}(\\d+)$`);
     let maxSeq = 0;
     this.activities.forEach((_, id) => {
@@ -220,11 +364,9 @@ export class CPMEngine {
       }
     });
 
-    // Next sequence: round up to next 10 for cleanliness
     const nextSeq = Math.ceil((maxSeq + 1) / 10) * 10;
     const code = `${prefix}${building}${String(nextSeq).padStart(3, '0')}`;
 
-    // Safety: if somehow this code exists, increment by 10
     if (this.activities.has(code)) {
       return `${prefix}${building}${String(nextSeq + 10).padStart(3, '0')}`;
     }
@@ -232,7 +374,6 @@ export class CPMEngine {
     return code;
   }
 
-  // Resolve a human-readable WBS name from a WBS path
   _wbsNameFromPath(wbs) {
     const nameMap = {
       'precon': 'Preconstruction', 'foundation': 'Foundation', 'steel': 'Structural Steel',
@@ -243,7 +384,6 @@ export class CPMEngine {
     for (const [key, val] of Object.entries(nameMap)) {
       if (wbsLower.includes(key)) return val;
     }
-    // If it's a custom WBS, extract the last segment
     const parts = wbs.split('.');
     return parts[parts.length - 1] || 'General';
   }

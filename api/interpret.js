@@ -86,7 +86,9 @@ Given a natural language command, output ONLY a JSON object (no markdown, no exp
     - Same as create_wbs but adds to an EXISTING WBS
     - activities are auto-chained unless a specific predecessorCode is given
 
-14. If unclear: {"action":"clarify","message":"your clarification question"}
+14. { "action": "critical_path" } — Show/highlight the critical path. Triggered by "show critical path", "what's the critical path", "highlight zero float activities", "which activities are critical", etc.
+
+15. If unclear: {"action":"clarify","message":"your clarification question"}
 
 IMPORTANT RULES:
 - "push back" or "delay" = POSITIVE days (later)

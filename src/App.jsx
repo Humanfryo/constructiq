@@ -17,7 +17,7 @@ const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 50;
 const LEFT_PANEL_WIDTH = 400;
 
-function GanttChart({ activities, relationships, engine, highlighted, animating, filterBuilding, onActivityClick }) {
+function GanttChart({ activities, relationships, engine, highlighted, animating, filterBuilding, showCriticalPath, onActivityClick }) {
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
   const [dayWidth, setDayWidth] = useState(4);
@@ -193,12 +193,12 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
               return (
                 <div key={act.id} onClick={() => onActivityClick(act)} style={{
                   position: 'absolute', left: x, top: y, width: w, height: h, borderRadius: 3,
-                  background: act.status === 'Completed' ? `${color}44` : color,
-                  border: isHL ? '2px solid #fff' : isAnim ? '2px solid #fbbf24' : `1px solid ${color}66`,
+                  background: act.status === 'Completed' ? `${color}44` : (showCriticalPath && act.isCritical) ? '#ef4444' : color,
+                  border: isHL ? '2px solid #fff' : isAnim ? '2px solid #fbbf24' : (showCriticalPath && act.isCritical) ? '1px solid #fca5a5' : `1px solid ${color}66`,
                   cursor: 'pointer',
                   transition: 'left 0.8s cubic-bezier(0.34,1.56,0.64,1), width 0.8s ease, background 0.3s, box-shadow 0.3s',
                   zIndex: isHL ? 10 : 3,
-                  boxShadow: isHL ? `0 0 16px ${color}55` : isAnim ? '0 0 20px rgba(251,191,36,0.3)' : 'none',
+                  boxShadow: isHL ? `0 0 16px ${color}55` : isAnim ? '0 0 20px rgba(251,191,36,0.3)' : (showCriticalPath && act.isCritical) ? '0 0 12px rgba(239,68,68,0.4)' : 'none',
                   display: 'flex', alignItems: 'center', overflow: 'hidden',
                 }}>
                   {act.pctComplete > 0 && act.pctComplete < 100 && (
@@ -311,6 +311,7 @@ export default function App() {
   const [filterBuilding, setFilterBuilding] = useState(null);
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showCriticalPath, setShowCriticalPath] = useState(false);
   const inputRef = useRef(null);
 
   const voice = useVoiceInput();
@@ -590,6 +591,17 @@ export default function App() {
         break;
       }
 
+      case 'critical_path': {
+        setShowCriticalPath(true);
+        const stats = engine.getCriticalPathStats();
+        const critIds = new Set(stats.criticalActivities.map(a => a.id));
+        setHighlighted(critIds);
+        setAnimating(critIds);
+        setTimeout(() => setAnimating(new Set()), 3000);
+        const topCrit = stats.criticalActivities.slice(0, 5).map(a => `${a.code} (${a.name}, ${a.totalFloat}d float)`).join(', ');
+        addLog(`✓ Critical path: ${stats.criticalCount} activities with zero float out of ${stats.totalActivities} total. ${stats.nearCriticalCount} near-critical (≤5d float). Top: ${topCrit}`, 'success');
+        break;
+      }
       case 'clarify': {
         addLog(`⚠ ${parsed.message}`, 'warning');
         break;
@@ -703,6 +715,23 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
+          <button onClick={() => {
+            const next = !showCriticalPath;
+            setShowCriticalPath(next);
+            if (next) {
+              const critIds = new Set(engine.getCriticalPath().map(a => a.id));
+              setHighlighted(critIds);
+              addLog(`Critical path: ${critIds.size} activities with zero float`, 'info');
+            } else {
+              setHighlighted(new Set());
+            }
+          }} style={{
+            padding: '4px 10px', borderRadius: 4, border: 'none',
+            background: showCriticalPath ? '#ef4444' : '#1e293b',
+            color: showCriticalPath ? '#fff' : '#64748b',
+            fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5,
+            marginRight: 8,
+          }}>CRIT PATH</button>
           {[null, 1, 2, 3, 4].map(b => (
             <button key={b || 'all'} onClick={() => { setFilterBuilding(b); setHighlighted(new Set()); }}
               style={{
@@ -721,6 +750,7 @@ export default function App() {
         <GanttChart
           activities={activities} relationships={relationships} engine={engine}
           highlighted={highlighted} animating={animating} filterBuilding={filterBuilding}
+          showCriticalPath={showCriticalPath}
           onActivityClick={(act) => { setSelectedActivity(act); highlightDownstream(act.id); }}
         />
       </div>
@@ -885,6 +915,9 @@ export default function App() {
               ['Start', formatDate(selectedActivity.calculatedStart || selectedActivity.startDay)],
               ['Finish', formatDate((selectedActivity.calculatedStart || selectedActivity.startDay) + selectedActivity.duration - 1)],
               ['Progress', `${selectedActivity.pctComplete}%`],
+              ['Float', `${selectedActivity.totalFloat != null ? selectedActivity.totalFloat : '—'}d${selectedActivity.isCritical ? ' ⚠ CRITICAL' : ''}`],
+              ['Late Start', selectedActivity.lateStart != null ? formatDate(selectedActivity.lateStart) : '—'],
+              ['Late Finish', selectedActivity.lateFinish != null ? formatDate(selectedActivity.lateFinish) : '—'],
               ['Downstream', `${engine.getDownstream(selectedActivity.id).size} activities`],
             ].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between' }}>
