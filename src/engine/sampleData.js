@@ -9,17 +9,99 @@ const _dynamicColorMap = new Map();
 let _colorIndex = 0;
 
 export function getWbsColor(wbs) {
-  // Check built-in colors first
   for (const [k, c] of Object.entries(WBS_COLORS)) {
     if (wbs.toLowerCase().includes(k.toLowerCase())) return c;
   }
-  // For custom WBS, assign a stable color from the extra palette
   const wbsKey = wbs.toLowerCase();
   if (!_dynamicColorMap.has(wbsKey)) {
     _dynamicColorMap.set(wbsKey, EXTRA_COLORS[_colorIndex % EXTRA_COLORS.length]);
     _colorIndex++;
   }
   return _dynamicColorMap.get(wbsKey);
+}
+
+// ============================================================
+// TRADE / DIVISION CLASSIFICATION
+// ============================================================
+// Trades represent the actual work discipline, independent of
+// WBS phase. A single WBS phase like "MEP" contains activities
+// from Electrical, Plumbing, Mechanical, and Fire Protection.
+// ============================================================
+
+export const TRADES = [
+  'Electrical',
+  'Plumbing',
+  'Structural Steel',
+  'Concrete',
+  'Mechanical/HVAC',
+  'Fire Protection',
+  'Power Systems',
+  'Finishes',
+  'Commissioning',
+  'General/Site',
+];
+
+export const TRADE_COLORS = {
+  'Electrical': '#FACC15',  // Yellow
+  'Plumbing': '#38BDF8',  // Light blue
+  'Structural Steel': '#EF4444',  // Red
+  'Concrete': '#F59E0B',  // Amber
+  'Mechanical/HVAC': '#22C55E',  // Green
+  'Fire Protection': '#F97316',  // Orange
+  'Power Systems': '#A855F7',  // Purple
+  'Finishes': '#EC4899',  // Pink
+  'Commissioning': '#06B6D4',  // Cyan
+  'General/Site': '#64748B',  // Slate
+};
+
+// Infer trade from activity name (and optionally WBS context)
+export function inferTrade(activityName, wbs) {
+  const n = (activityName || '').toLowerCase();
+  const w = (wbs || '').toLowerCase();
+
+  // Electrical
+  if (/electrical|energiz|wiring|panel|switchgear|cable\s*tray|conduit|power\s*dist/i.test(n)) return 'Electrical';
+
+  // Power Systems (generators, UPS, transformers)
+  if (/generator|ups\b|uninterrupt|transformer|battery|pdu/i.test(n)) return 'Power Systems';
+
+  // Plumbing
+  if (/plumbing|piping|drainage|sanitary|water\s*line|domestic\s*water|storm\s*drain/i.test(n)) return 'Plumbing';
+
+  // Fire Protection
+  if (/fire\s*protect|sprinkler|fire\s*alarm|fire\s*suppression|standpipe/i.test(n)) return 'Fire Protection';
+
+  // Mechanical / HVAC
+  if (/mechanical|hvac|duct|air\s*handler|chiller|cooling|balancing|ahu|crac|ventilat/i.test(n)) return 'Mechanical/HVAC';
+
+  // Structural Steel
+  if (/steel|column|beam|joist|decking|anchor\s*bolt|embed|erect|roof\s*steel/i.test(n)) return 'Structural Steel';
+
+  // Concrete
+  if (/concrete|slab|topping|equipment\s*pad|sog|grade\s*beam|foundation\s*wall|pour|formwork|rebar/i.test(n)) return 'Concrete';
+
+  // Finishes
+  if (/finish|clad|roofing|framing|drywall|paint|flooring|door|hardware|exterior\s*skin|ceiling|tile/i.test(n)) return 'Finishes';
+
+  // Commissioning (testing, inspections, turnover)
+  if (/commission|testing|inspection|turnover|punchlist|acceptance|startup/i.test(n)) return 'Commissioning';
+
+  // General / Site (survey, permits, mobilization, excavation, pile, waterproofing)
+  if (/survey|permit|mobil|excav|pile|waterproof|submittal|layout|grading|backfill|dewater/i.test(n)) return 'General/Site';
+
+  // Fallback: try WBS context
+  if (w.includes('steel')) return 'Structural Steel';
+  if (w.includes('concrete') || w.includes('foundation')) return 'Concrete';
+  if (w.includes('mep')) return 'Mechanical/HVAC';
+  if (w.includes('finish')) return 'Finishes';
+  if (w.includes('commission')) return 'Commissioning';
+  if (w.includes('precon') || w.includes('sitework')) return 'General/Site';
+
+  return 'General/Site';
+}
+
+export function getTradeColor(trade) {
+  return TRADE_COLORS[trade] || '#64748B';
 }
 
 export function generateSampleData() {
@@ -66,6 +148,7 @@ export function generateSampleData() {
       ph.tasks.forEach(t => {
         activities.push({
           id: t.code, code: t.code, name: t.name, wbs: ph.wbs, wbsName: ph.name, building: bldg, duration: t.dur, startDay: t.start,
+          trade: inferTrade(t.name, ph.wbs),
           status: t.start < 20 ? 'Completed' : t.start < 60 ? 'In Progress' : 'Not Started', pctComplete: t.start < 20 ? 100 : t.start < 60 ? Math.floor(Math.random() * 60 + 20) : 0
         });
       });
