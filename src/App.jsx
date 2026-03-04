@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { CPMEngine } from "./engine/CPMEngine.js";
 import { generateSampleData, PROJECT_START, formatDate, getWbsColor, getTradeColor, inferTrade, TRADES, TRADE_COLORS } from "./engine/sampleData.js";
+import { exportToP6Excel } from "./engine/p6Export.js";
 import { interpretCommandWithAI } from "./engine/aiInterpreter.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 
@@ -319,6 +320,15 @@ export default function App() {
   const inputRef = useRef(null);
 
   const voice = useVoiceInput();
+
+  const handleExport = useCallback(() => {
+    try {
+      const result = exportToP6Excel(engine);
+      addLog(`✓ Exported ${result.activityCount} activities, ${result.relationshipCount} relationships, ${result.wbsCount} WBS elements → ${result.filename}`, 'success');
+    } catch (err) {
+      addLog(`✗ Export failed: ${err.message}`, 'error');
+    }
+  }, [engine, addLog]);
 
   const addLog = useCallback((text, type = 'info') => {
     setCommandLog(prev => [...prev.slice(-30), { text, type, ts: Date.now() }]);
@@ -737,6 +747,11 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
+          <button onClick={handleExport} style={{
+            padding: '4px 10px', borderRadius: 4, border: 'none',
+            background: '#1e293b', color: '#64748b',
+            fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5,
+          }}>EXPORT P6</button>
           <button onClick={() => {
             setColorByTrade(prev => !prev);
             if (!colorByTrade) {
