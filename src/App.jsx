@@ -614,14 +614,12 @@ export default function App() {
     setIsProcessing(false);
   }, [engine, executeAction, addLog]);
 
-  // Watch for finalized voice transcript
+  // Sync live voice transcription into the command input field (no auto-submit)
   useEffect(() => {
-    if (voice.transcript) {
-      setCommand(voice.transcript);
-      processCommand(voice.transcript);
-      voice.clearTranscript();
+    if (voice.isListening && voice.liveTranscript) {
+      setCommand(voice.liveTranscript);
     }
-  }, [voice.transcript]);
+  }, [voice.liveTranscript, voice.isListening]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && command.trim()) {
@@ -640,8 +638,13 @@ export default function App() {
       addLog('⚠ Mic blocked in this iframe. Use keyboard dictation: Mac → Fn Fn, Windows → Win+H, Mobile → 🎤 on keyboard', 'warning');
       return;
     }
-    if (voice.isListening) { voice.stopListening(); }
-    else { voice.startListening(); }
+    if (voice.isListening) {
+      voice.stopListening();
+    } else {
+      setCommand('');
+      voice.startListening();
+      addLog('🎙 Listening... speak your command, then click SEND when done', 'info');
+    }
   };
 
   const stats = useMemo(() => {
@@ -741,7 +744,7 @@ export default function App() {
           }}>
             <WaveformVisualizer isActive={voice.isListening} />
             <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>
-              {voice.isListening ? 'Listening...' : 'Processing...'}
+              {voice.isListening ? 'Dictating — click SEND when done' : 'Processing...'}
             </span>
             {voice.interimTranscript && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic', flex: 1 }}>
