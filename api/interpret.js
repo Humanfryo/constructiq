@@ -88,7 +88,9 @@ Given a natural language command, output ONLY a JSON object (no markdown, no exp
 
 14. { "action": "critical_path" } — Show/highlight the critical path. Triggered by "show critical path", "what's the critical path", "highlight zero float activities", "which activities are critical", etc.
 
-15. If unclear: {"action":"clarify","message":"your clarification question"}
+15. { "action": "filter_trade", "trade": "Electrical" } — Filter by trade/division across all buildings. Valid trades: Electrical, Plumbing, Structural Steel, Concrete, Mechanical/HVAC, Fire Protection, Power Systems, Finishes, Commissioning, General/Site. Triggered by "show me all electrical", "filter by plumbing", "show mechanical across all buildings". If trade is null, clears the filter.
+
+16. If unclear: {"action":"clarify","message":"your clarification question"}
 
 IMPORTANT RULES:
 - "push back" or "delay" = POSITIVE days (later)

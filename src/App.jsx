@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { CPMEngine } from "./engine/CPMEngine.js";
-import { generateSampleData, PROJECT_START, formatDate, getWbsColor } from "./engine/sampleData.js";
+import { generateSampleData, PROJECT_START, formatDate, getWbsColor, getTradeColor, inferTrade, TRADES, TRADE_COLORS } from "./engine/sampleData.js";
 import { interpretCommandWithAI } from "./engine/aiInterpreter.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 
@@ -17,7 +17,7 @@ const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 50;
 const LEFT_PANEL_WIDTH = 400;
 
-function GanttChart({ activities, relationships, engine, highlighted, animating, filterBuilding, showCriticalPath, onActivityClick }) {
+function GanttChart({ activities, relationships, engine, highlighted, animating, filterBuilding, colorByTrade, filterTrade, showCriticalPath, onActivityClick }) {
   const [scrollX, setScrollX] = useState(0);
   const [scrollY, setScrollY] = useState(0);
   const [dayWidth, setDayWidth] = useState(4);
@@ -39,9 +39,11 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
   }, [activities]);
 
   const filtered = useMemo(() => {
-    if (!filterBuilding) return sorted;
-    return sorted.filter(a => a.building === filterBuilding);
-  }, [sorted, filterBuilding]);
+    let result = sorted;
+    if (filterBuilding) result = result.filter(a => a.building === filterBuilding);
+    if (filterTrade) result = result.filter(a => a.trade === filterTrade);
+    return result;
+  }, [sorted, filterBuilding, filterTrade]);
 
   const totalDays = useMemo(() => {
     let max = 0;
@@ -107,7 +109,7 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
               <div key={act.id}>
                 {showH && (
                   <div style={{ height: ROW_HEIGHT, display: 'flex', alignItems: 'center', padding: '0 12px', background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
-                    <div style={{ width: 4, height: 14, borderRadius: 2, background: getWbsColor(act.wbs), marginRight: 8 }} />
+                    <div style={{ width: 4, height: 14, borderRadius: 2, background: colorByTrade ? getTradeColor(act.trade) : getWbsColor(act.wbs), marginRight: 8 }} />
                     <span style={{ fontSize: 10, color: '#64748b', fontWeight: 700, letterSpacing: 0.8 }}>BLDG {act.building} — {act.wbsName.toUpperCase()}</span>
                   </div>
                 )}
@@ -187,7 +189,7 @@ function GanttChart({ activities, relationships, engine, highlighted, animating,
               const w = Math.max(act.duration * dayWidth, 3);
               const y = (row - 1) * ROW_HEIGHT + 7;
               const h = ROW_HEIGHT - 14;
-              const color = getWbsColor(act.wbs);
+              const color = colorByTrade ? getTradeColor(act.trade) : getWbsColor(act.wbs);
               const isHL = highlighted.has(act.id);
               const isAnim = animating.has(act.id);
               return (
@@ -312,6 +314,8 @@ export default function App() {
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const [colorByTrade, setColorByTrade] = useState(false);
+  const [filterTrade, setFilterTrade] = useState(null);
   const inputRef = useRef(null);
 
   const voice = useVoiceInput();
@@ -481,6 +485,7 @@ export default function App() {
         });
 
         if (newAct) {
+          newAct.trade = inferTrade(name, wbs);
           refresh();
           const hl = new Set([newAct.id]);
           setHighlighted(hl);
@@ -517,6 +522,7 @@ export default function App() {
           activities: activityDefs,
         });
 
+        result.activities.forEach(a => { a.trade = inferTrade(a.name, result.wbs); });
         refresh();
 
         const hl = new Set(result.activities.map(a => a.id));
@@ -572,6 +578,7 @@ export default function App() {
           });
 
           if (act) {
+            act.trade = inferTrade(def.name, wbs);
             created.push(act);
             prevId = act.id;
           }
@@ -591,6 +598,21 @@ export default function App() {
         break;
       }
 
+      case 'filter_trade': {
+        const trade = parsed.trade;
+        if (trade) {
+          setColorByTrade(true);
+          setFilterTrade(trade);
+          setFilterBuilding(null);
+          const count = engine.getAllActivitiesList().filter(a => a.trade === trade).length;
+          addLog(`✓ Showing ${count} ${trade} activities across all buildings`, 'success');
+        } else {
+          setColorByTrade(false);
+          setFilterTrade(null);
+          addLog('Showing all trades', 'info');
+        }
+        break;
+      }
       case 'critical_path': {
         setShowCriticalPath(true);
         const stats = engine.getCriticalPathStats();
@@ -716,6 +738,19 @@ export default function App() {
 
         <div style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
           <button onClick={() => {
+            setColorByTrade(prev => !prev);
+            if (!colorByTrade) {
+              addLog('Color by trade division — bars now colored by work discipline', 'info');
+            } else {
+              addLog('Color by WBS phase', 'info');
+            }
+          }} style={{
+            padding: '4px 10px', borderRadius: 4, border: 'none',
+            background: colorByTrade ? '#FACC15' : '#1e293b',
+            color: colorByTrade ? '#000' : '#64748b',
+            fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5,
+          }}>TRADES</button>
+          <button onClick={() => {
             const next = !showCriticalPath;
             setShowCriticalPath(next);
             if (next) {
@@ -743,6 +778,27 @@ export default function App() {
             >{b ? `BLDG ${b}` : 'ALL'}</button>
           ))}
         </div>
+        {colorByTrade && (
+          <div style={{ display: 'flex', gap: 2, marginLeft: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => setFilterTrade(null)} style={{
+              padding: '3px 8px', borderRadius: 3, border: 'none',
+              background: filterTrade === null ? '#3b82f6' : '#1e293b',
+              color: filterTrade === null ? '#fff' : '#64748b',
+              fontSize: 9, fontWeight: 700, cursor: 'pointer',
+            }}>ALL</button>
+            {Object.entries(TRADE_COLORS).map(([trade, tc]) => (
+              <button key={trade} onClick={() => {
+                setFilterTrade(filterTrade === trade ? null : trade);
+                if (filterTrade !== trade) addLog(`Filtering to ${trade} across all buildings`, 'info');
+              }} style={{
+                padding: '3px 8px', borderRadius: 3, border: 'none',
+                background: filterTrade === trade ? tc : '#1e293b',
+                color: filterTrade === trade ? (tc === '#FACC15' || tc === '#F59E0B' ? '#000' : '#fff') : '#64748b',
+                fontSize: 9, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}>{trade}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ===== GANTT ===== */}
@@ -750,7 +806,7 @@ export default function App() {
         <GanttChart
           activities={activities} relationships={relationships} engine={engine}
           highlighted={highlighted} animating={animating} filterBuilding={filterBuilding}
-          showCriticalPath={showCriticalPath}
+          colorByTrade={colorByTrade} filterTrade={filterTrade} showCriticalPath={showCriticalPath}
           onActivityClick={(act) => { setSelectedActivity(act); highlightDownstream(act.id); }}
         />
       </div>
@@ -909,6 +965,7 @@ export default function App() {
           <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
             {[
               ['WBS', selectedActivity.wbs],
+              ['Trade', selectedActivity.trade || 'Unclassified'],
               ['Building', `Building ${selectedActivity.building}`],
               ['Status', selectedActivity.status],
               ['Duration', `${selectedActivity.duration} days`],
