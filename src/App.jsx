@@ -321,6 +321,10 @@ export default function App() {
 
   const voice = useVoiceInput();
 
+  const addLog = useCallback((text, type = 'info') => {
+    setCommandLog(prev => [...prev.slice(-30), { text, type, ts: Date.now() }]);
+  }, []);
+
   const handleExport = useCallback(() => {
     try {
       const result = exportToP6Excel(engine);
@@ -329,10 +333,6 @@ export default function App() {
       addLog(`✗ Export failed: ${err.message}`, 'error');
     }
   }, [engine, addLog]);
-
-  const addLog = useCallback((text, type = 'info') => {
-    setCommandLog(prev => [...prev.slice(-30), { text, type, ts: Date.now() }]);
-  }, []);
 
   const refresh = useCallback(() => {
     setActivities([...engine.recalculate()]);
